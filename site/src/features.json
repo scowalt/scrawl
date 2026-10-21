@@ -496,7 +496,7 @@
       "status": "stable@0.3.4",
       "platforms": ["mac", "windows"],
       "config": [
-        { "key": "agentHost", "value": "\"studio\"", "does": "SSH host whose OpenCode holds the sessions" },
+        { "key": "agentHost", "value": "\"studio\"", "does": "SSH host where the agents and their OpenCode run" },
         { "key": "agentOpencode", "value": "\"opencode2\"", "does": "The opencode command on that host" }
       ]
     },
@@ -504,12 +504,13 @@
       "id": "remote-agents",
       "group": "delivery",
       "name": "Agents on other machines",
-      "says": "Syncs captures to remote agent hosts and pastes the remote paths.",
-      "status": "branch:feat/remote-agents",
+      "says": "Copies every finished capture to the agent host over SSH and pastes paths that exist there.",
+      "status": "main",
       "platforms": ["mac"],
       "added": "2026-10-21",
       "pr": 65,
-      "config": [{ "key": "agentPath", "value": "path", "does": "Where captures go on the remote host" }]
+      "config": [{ "key": "agentPath", "value": "\"~/.scrawl/captures\"", "does": "Where captures go on the agent host" }],
+      "docs": ["docs/iphone-and-routing.md"]
     },
     {
       "id": "security-defaults",
