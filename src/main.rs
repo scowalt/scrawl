@@ -1589,6 +1589,14 @@ fn main() -> Result<()> {
             iphone: false,
         },
     };
+    let result = run(command);
+    // A CLI capture or `scrawl send` streams heavy media to the agent host on a thread; exiting
+    // would cut it off and leave `.media-pending` on the host.
+    handoff::wait_for_media_syncs();
+    result
+}
+
+fn run(command: Command) -> Result<()> {
     match command {
         Command::App { record, iphone } => {
             #[cfg(target_os = "windows")]
