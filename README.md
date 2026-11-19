@@ -52,7 +52,7 @@ When your coding agent runs in an SSH terminal on another machine (an `exe.dev` 
 }
 ```
 
-(Or set `SCRAWL_AGENT_HOST`, and optionally `"agentPath"` / `SCRAWL_AGENT_PATH`, which defaults to `"~/.scrawl/captures"`.) When a capture finishes, Scrawl streams the light bundle files (`contact-sheet.png`, `frames/*.png`, `scrawl.json`, `summary.md`) to `~/.scrawl/captures/<id>.scrawl` on that host over SSH (`ControlMaster`), then streams `recording.mp4` and `audio.wav` in the background (marked by `.media-pending` until complete). `⌘V`, `⌥⇧V` in a terminal, and `scrawl send` all use the remote path on that host so OpenCode, Claude Code, and Codex can open the images directly.
+(Or set `SCRAWL_AGENT_HOST`, and optionally `"agentPath"` / `SCRAWL_AGENT_PATH`, which defaults to `"~/.scrawl/captures"`.) The host needs `sh`, `tar` and `base64`; its login shell can be anything, including fish. A `RemoteCommand` or `RequestTTY` in your `~/.ssh/config` entry (such as `tmux -CC`) is overridden for Scrawl's commands. When a capture finishes, Scrawl streams the light bundle files (`contact-sheet.png`, `frames/*.png`, `scrawl.json`, `summary.md`) to `~/.scrawl/captures/<id>.scrawl` on that host over SSH (`ControlMaster`), then streams `recording.mp4` and `audio.wav` in the background (marked by `.media-pending` until complete). `⌘V`, `⌥⇧V` in a terminal, and `scrawl send` all use the remote path on that host so OpenCode, Claude Code, and Codex can open the images directly.
 
 ## Usage
 

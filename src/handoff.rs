@@ -1019,9 +1019,23 @@ fn system_tool(name: &str) -> PathBuf {
     }
 }
 
-fn ssh(host: &str) -> Command {
+/// Runs the POSIX `script` on `host`. Every Scrawl ssh is one non-interactive command, so it
+/// overrides a host entry's `RemoteCommand` (e.g. `tmux -CC new-session`) and `RequestTTY yes`,
+/// which would otherwise make ssh refuse with "Cannot execute command-line and remote command".
+/// ssh hands the command to the login shell, which may be fish: the script goes as base64 (no
+/// quotes or backslashes for any shell to read) that `sh` decodes, leaving stdin for the caller.
+fn ssh(host: &str, script: &str) -> Command {
     let mut command = Command::new(system_tool("ssh"));
-    command.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=8"]);
+    command.args([
+        "-o",
+        "BatchMode=yes",
+        "-o",
+        "ConnectTimeout=8",
+        "-o",
+        "RemoteCommand=none",
+        "-o",
+        "RequestTTY=no",
+    ]);
     #[cfg(unix)]
     command.args([
         "-o",
@@ -1031,8 +1045,15 @@ fn ssh(host: &str) -> Command {
         "-o",
         "ControlPath=/tmp/scrawl-ssh-%C",
     ]);
-    command.arg(host);
+    command.arg(host).arg(posix_command(script));
     command
+}
+
+fn posix_command(script: &str) -> String {
+    format!(
+        "sh -c 'eval \"$(printf %s {} | base64 -d)\"'",
+        base64(script.as_bytes())
+    )
 }
 
 /// Bundle files too big to hold up queueing the session; they follow in the background.
@@ -1074,8 +1095,7 @@ fn ssh_tar(host: &str, tar_args: &[String], remote_cmd: &str) -> Result<String> 
         .stderr(Stdio::null())
         .spawn()
         .context("Could not start tar")?;
-    let output = ssh(host)
-        .arg(remote_cmd)
+    let output = ssh(host, remote_cmd)
         .stdin(tar.stdout.take().context("No tar output")?)
         .output()
         .context("Could not start ssh")?;
@@ -1219,8 +1239,21 @@ pub fn sync_bundle_to_with(
             experiment(AGENT_CONTEXT),
         );
         let _ = fs::write(bundle_dir.join("summary.md"), summary.as_bytes());
-        if !heavy.is_empty() {
-            heavy.push(format!("{name_str}/summary.md"));
+        // The copy already there names the unresolved `~/…` path: replace it, with the heavy
+        // media when there is some, else now.
+        let summary_rel = format!("{name_str}/summary.md");
+        if heavy.is_empty() {
+            let root_q = shell_quote(&remote_root.to_string_lossy());
+            let args = vec![
+                "-C".to_owned(),
+                parent.to_string_lossy().into_owned(),
+                "-cf".to_owned(),
+                "-".to_owned(),
+                summary_rel,
+            ];
+            (hooks.remote_tar)(host, &args, &format!("tar -C {root_q} -xf -"))?;
+        } else {
+            heavy.push(summary_rel);
         }
     }
 
@@ -1254,15 +1287,37 @@ pub fn sync_bundle_to_with(
         let remote_tar = hooks.remote_tar;
         let run_heavy = move || {
             let _done = RemoveOnDrop(sending);
-            let _ = remote_tar(&host_owned, &bg_args, &remote);
+            if let Err(error) = remote_tar(&host_owned, &bg_args, &remote) {
+                crate::capture::scrawl_log(format!("media sync to {host_owned} failed: {error:#}"));
+            }
         };
         if hooks.background_heavy {
-            std::thread::spawn(run_heavy);
+            let mut syncs = MEDIA_SYNCS
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            syncs.retain(|sync| !sync.is_finished());
+            syncs.push(std::thread::spawn(run_heavy));
         } else {
             run_heavy();
         }
     }
     Ok(remote_bundle)
+}
+
+static MEDIA_SYNCS: std::sync::Mutex<Vec<std::thread::JoinHandle<()>>> =
+    std::sync::Mutex::new(Vec::new());
+
+/// Waits for heavy media still streaming to the agent host, so a CLI command that synced a
+/// bundle doesn't exit mid-copy.
+pub fn wait_for_media_syncs() {
+    let syncs = std::mem::take(
+        &mut *MEDIA_SYNCS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+    );
+    for sync in syncs {
+        let _ = sync.join();
+    }
 }
 
 /// Syncs `bundle_dir` to [`agent_host`] when configured, returning the remote path or `None` if
@@ -1316,9 +1371,7 @@ fn opencode_api(method: &str, path: &str, data: Option<&serde_json::Value>) -> R
                 shell_quote(&serde_json::to_string(data)?)
             ));
         }
-        let mut command = ssh(&host);
-        command.arg(remote);
-        command
+        ssh(&host, &remote)
     } else {
         let mut command = Command::new(opencode_binary()?);
         command.args(["api", method, path]);
@@ -2516,6 +2569,68 @@ mod tests {
     }
 
     #[test]
+    fn ssh_overrides_interactive_host_config() {
+        let command = ssh("scott-beelink-ubuntu", "true");
+        let args: Vec<String> = command
+            .get_args()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        for option in ["BatchMode=yes", "RemoteCommand=none", "RequestTTY=no"] {
+            let at = args.iter().position(|a| a == option);
+            assert!(
+                at.is_some_and(|i| args[i - 1] == "-o"),
+                "{option}: {args:?}"
+            );
+        }
+        assert_eq!(args[args.len() - 2], "scott-beelink-ubuntu");
+        assert_eq!(args[args.len() - 1], posix_command("true"));
+    }
+
+    /// The remote login shell parses the command ssh sends; whichever it is, `sh` must run the
+    /// script byte for byte with stdin still free.
+    #[test]
+    fn posix_command_survives_any_login_shell() {
+        use std::io::Write;
+        use std::process::Stdio;
+        let data = serde_json::json!({"text": "a\\b \"q\" it's $HOME `x`\nline"}).to_string();
+        let script = format!(
+            "d=\"$(cat)\" && printf '%s|%s' \"$d\" {}",
+            shell_quote(&data)
+        );
+        let shells: Vec<&str> = [
+            "/bin/sh",
+            "/bin/zsh",
+            "/opt/homebrew/bin/fish",
+            "/usr/bin/fish",
+        ]
+        .into_iter()
+        .filter(|shell| Path::new(shell).exists())
+        .collect();
+        assert!(shells.len() >= 2, "{shells:?}");
+        for shell in shells {
+            let mut child = Command::new(shell)
+                .arg("-c")
+                .arg(posix_command(&script))
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"tar-stream")
+                .unwrap();
+            let output = child.wait_with_output().unwrap();
+            assert_eq!(
+                String::from_utf8_lossy(&output.stdout),
+                format!("tar-stream|{data}"),
+                "{shell}"
+            );
+        }
+    }
+
+    #[test]
     fn agent_host_and_path_validate_and_default() {
         let cfg = Config {
             agent_host: Some("kitbox.exe.xyz".into()),
@@ -2674,6 +2789,61 @@ mod tests {
     }
 
     #[test]
+    fn first_sync_without_media_leaves_the_resolved_path_on_the_host() {
+        use std::process::Stdio;
+        use std::sync::Mutex;
+
+        static REMOTE_HOME: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+        fn fake_remote_tar(_host: &str, tar_args: &[String], remote_cmd: &str) -> Result<String> {
+            let home = REMOTE_HOME.lock().unwrap().clone().unwrap();
+            let mut tar = Command::new(system_tool("tar"))
+                .args(tar_args)
+                .stdout(Stdio::piped())
+                .spawn()?;
+            let output = Command::new("/bin/sh")
+                .arg("-c")
+                .arg(remote_cmd)
+                .env("HOME", &home)
+                .stdin(tar.stdout.take().unwrap())
+                .output()?;
+            let _ = tar.wait();
+            ensure!(output.status.success(), "fake remote command failed");
+            Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+        }
+
+        let fixture = Fixture::new();
+        let remote_home = fixture.0.join("remote-home/scowalt");
+        fs::create_dir_all(&remote_home).unwrap();
+        *REMOTE_HOME.lock().unwrap() = Some(remote_home.clone());
+        let local_bundle = fixture.bundle("no-media", 500);
+        fs::write(local_bundle.join("contact-sheet.png"), b"sheet-png").unwrap();
+
+        let hooks = SyncHooks {
+            remote_tar: fake_remote_tar,
+            background_heavy: false,
+        };
+        // A host no other test syncs to, so its home folder isn't known yet.
+        let remote_bundle =
+            sync_bundle_to_with("no-media.host", DEFAULT_AGENT_PATH, &local_bundle, &hooks)
+                .unwrap();
+
+        assert_eq!(
+            remote_bundle,
+            remote_home.join(".scrawl/captures/no-media.scrawl")
+        );
+        let remote_summary = fs::read_to_string(remote_bundle.join("summary.md")).unwrap();
+        assert!(
+            remote_summary.contains(&remote_bundle.display().to_string()),
+            "{remote_summary}"
+        );
+        assert_eq!(
+            remote_summary,
+            fs::read_to_string(local_bundle.join("summary.md")).unwrap()
+        );
+    }
+
+    #[test]
     fn failed_remote_sync_leaves_local_paths_intact() {
         fn failing_tar(_host: &str, _args: &[String], _cmd: &str) -> Result<String> {
             bail!("ssh: connect to host offline.exe.xyz port 22: Operation timed out")
@@ -2703,11 +2873,12 @@ mod tests {
 
 #[cfg(test)]
 mod sync_live_check {
-    /// Manual: `cargo test sync_to_pro -- --ignored` copies a dummy bundle to `pro` and checks the
-    /// heavy media lands atomically and the marker clears.
+    /// Manual: `SCRAWL_LIVE_HOST=<ssh host> cargo test sync_to_live_host -- --ignored` copies a
+    /// dummy bundle to that host and checks the heavy media lands atomically and the marker clears.
     #[test]
     #[ignore]
-    fn sync_to_pro() {
+    fn sync_to_live_host() {
+        let host = std::env::var("SCRAWL_LIVE_HOST").unwrap_or_else(|_| "pro".to_owned());
         let base = std::path::PathBuf::from(std::env::var("HOME").unwrap())
             .join("Library/Caches/scrawl-sync-live");
         let _ = std::fs::remove_dir_all(&base);
@@ -2716,19 +2887,19 @@ mod sync_live_check {
         std::fs::write(bundle.join("summary.md"), "hi").unwrap();
         std::fs::write(bundle.join("recording.mp4"), vec![7u8; 8_000_000]).unwrap();
         std::fs::write(bundle.join("frames-full/frame-01.png"), b"png").unwrap();
-        let remote = super::sync_bundle_to("pro", &bundle).unwrap();
+        let remote = super::sync_bundle_to(&host, &bundle).unwrap();
         let q = super::shell_quote(&remote.to_string_lossy());
         let check = format!("ls -a {q}; ls {q}/frames-full; wc -c < {q}/recording.mp4");
         let mut out = String::new();
         for _ in 0..40 {
             std::thread::sleep(std::time::Duration::from_millis(250));
-            let o = super::ssh("pro").arg(&check).output().unwrap();
+            let o = super::ssh(&host, &check).output().unwrap();
             out = String::from_utf8_lossy(&o.stdout).into_owned();
             if !out.contains(super::MEDIA_PENDING) && out.contains("8000000") {
                 break;
             }
         }
-        let _ = super::ssh("pro").arg(format!("rm -rf {q}")).status();
+        let _ = super::ssh(&host, &format!("rm -rf {q}")).status();
         let _ = std::fs::remove_dir_all(&base);
         assert!(
             out.contains("8000000")
