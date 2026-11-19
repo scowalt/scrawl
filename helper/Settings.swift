@@ -134,7 +134,7 @@ struct SettingsPermission: Decodable, Equatable, Identifiable {
 
 /// Where new captures go: `~`-relative, and whether it was chosen here (Reset shows).
 struct SettingsCapturesDir: Decodable, Equatable {
-  var path = "~/Library/Application Support/scrawl/captures"
+  var path = "~/Library/Application Support/scrawl-remote/captures"
   var custom = false
 }
 
