@@ -63,18 +63,20 @@ pub fn configured_captures_dir(value: &str) -> Option<PathBuf> {
     }
 }
 
-/// `~/Library/Application Support/scrawl/captures` on macOS, `%LOCALAPPDATA%\scrawl\captures`
+/// `~/Library/Application Support/scrawl-remote/captures` on macOS, `%LOCALAPPDATA%\scrawl-remote\captures`
 /// on Windows (local, not roaming: the movies are large).
 pub fn builtin_captures_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
         dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("scrawl")
+            .join(crate::identity::DATA_NAME)
             .join("captures")
     } else {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("Library/Application Support/scrawl/captures")
+            .join("Library/Application Support")
+            .join(crate::identity::DATA_NAME)
+            .join("captures")
     }
 }
 
@@ -614,7 +616,9 @@ pub fn default_config_path() -> PathBuf {
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".config/scrawl/config.json")
+                .join(".config")
+                .join(crate::identity::DATA_NAME)
+                .join("config.json")
         })
 }
 
