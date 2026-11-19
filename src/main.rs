@@ -22,6 +22,7 @@ mod handoff;
 mod helper;
 mod hex;
 mod icons;
+mod identity;
 mod inbox;
 mod ingest_http;
 mod keyframes;

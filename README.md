@@ -1,5 +1,22 @@
 # Scrawl
 
+> **Scrawl Remote** is a personal fork of [kitlangton/scrawl](https://github.com/kitlangton/scrawl). It copies every finished capture to an agent host over SSH (see [Agents on another machine](#agents-on-another-machine)) and installs beside the official Scrawl.app without sharing anything with it:
+>
+> | | Official Scrawl | Scrawl Remote (this fork) |
+> |---|---|---|
+> | App | `/Applications/Scrawl.app` | `~/Applications/Scrawl Remote.app` |
+> | Bundle id | `dev.kitlangton.scrawl` | `com.scowalt.scrawl-remote` |
+> | Settings | `~/.config/scrawl/config.json` | `~/.config/scrawl-remote/config.json` |
+> | Captures | `~/Library/Application Support/scrawl/captures` | `~/Library/Application Support/scrawl-remote/captures` |
+> | Logs | `~/Library/Logs/Scrawl` | `~/Library/Logs/Scrawl Remote` |
+> | Updates | Sparkle | none (no Sparkle, so the official appcast can't replace it) |
+>
+> With separate settings, `agentHost` affects only the fork. The official app keeps sending to OpenCode the way it did before. Each app also has its own retention and crash recovery, and each runs its own onboarding, because macOS grants permissions per app.
+>
+> Some things can't be separated. Both apps default to `⌥⇧S` / `⌥⇧V`, and macOS lets both register the same shortcut, so with both running one press reaches both. Quit one of them, or change the fork's shortcuts in its Settings. Only one app can hold the iPhone/ScrawlKit ingest port (47777); the second to start logs `port 47777 already in use`.
+>
+> `./scripts/install-app.sh` builds, signs and restarts only the fork. It signs with a self-signed certificate (`scripts/signing-identity.sh`) kept in its own keychain, `~/Library/Keychains/scrawl-remote-signing.keychain-db`. macOS checks permission grants against the bundle id plus that certificate, so Screen Recording, Microphone and Accessibility survive rebuilds. An ad-hoc signature would change with every build and lose them.
+
 Show an agent a problem instead of describing it.
 
 Press a shortcut (`⌥⇧S`) and Scrawl starts recording the screen. Talk, click around, draw on it, and press `⌥⇧S` again to finish. Scrawl records the screen, your voice, and your marks, then packs them into a compact bundle: a contact sheet of annotated keyframes (`contact-sheet.png`), individual full-resolution keyframes (`frames/frame-XX.png`), a time-aligned transcript and interaction timeline (`summary.md`), and a structured manifest (`scrawl.json`).

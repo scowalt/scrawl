@@ -33,9 +33,9 @@ pub(super) const KEY_SOURCE: &str = "the key tap";
 pub(super) const NO_KEY_SOURCE: &str =
     "nowhere (Accessibility off; the record shortcut still works)";
 
-/// `~/Library/Logs/Scrawl`.
+/// `~/Library/Logs/Scrawl Remote`.
 pub fn log_dir() -> Option<PathBuf> {
-    dirs::home_dir().map(|home| home.join("Library/Logs/Scrawl"))
+    dirs::home_dir().map(|home| home.join("Library/Logs").join(crate::identity::LOG_NAME))
 }
 
 pub fn main_display_id() -> u32 {
