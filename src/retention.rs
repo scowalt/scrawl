@@ -187,6 +187,16 @@ fn recording() -> bool {
     RECORDING.load(Ordering::Acquire) > 0
 }
 
+/// Whether a capture is recording or a bundle is being built or worked on: not a moment to quit
+/// and relaunch (`sparkle::install_pending_update`).
+pub fn busy() -> bool {
+    recording()
+        || !BUSY
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+}
+
 // MARK: Planning
 
 #[derive(Debug, Default, Deserialize)]
