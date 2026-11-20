@@ -213,6 +213,8 @@ pub(super) fn reduce_motion() -> bool {
 /// Updates come from GitHub releases on Windows; the menu item opens the page.
 pub(super) fn start_updates() {}
 
+pub(super) fn install_pending_update() {}
+
 pub(super) fn check_for_updates() {
     let _ = crate::handoff::open_path(Path::new(
         "https://github.com/kitlangton/scrawl/releases/latest",

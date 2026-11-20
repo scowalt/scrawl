@@ -53,6 +53,25 @@ objc2::define_class!(
                 .store(UpdateStatus::UpToDate as u8, Ordering::Release);
         }
 
+        /// An automatic update is downloaded. Sparkle would wait for the app to quit, which a
+        /// menu-bar app rarely does, so install it now, or once no capture is busy.
+        #[unsafe(method(updater:willInstallUpdateOnQuit:immediateInstallationBlock:))]
+        fn will_install_update_on_quit(
+            &self,
+            _updater: &AnyObject,
+            _item: &AnyObject,
+            install: &AnyObject,
+        ) -> Bool {
+            let block: Option<Retained<AnyObject>> = unsafe { msg_send![install, copy] };
+            let Some(block) = block else {
+                return Bool::NO;
+            };
+            scrawl_log("Sparkle: update downloaded; installing it once no capture is busy");
+            PENDING_INSTALL.with(|pending| *pending.borrow_mut() = Some(block));
+            install_pending_update();
+            Bool::YES
+        }
+
         #[unsafe(method(updater:didFinishUpdateCycleForUpdateCheck:error:))]
         fn did_finish_update_cycle(
             &self,
@@ -85,6 +104,23 @@ struct SparkleUpdater {
 
 thread_local! {
     static UPDATER: RefCell<Option<SparkleUpdater>> = const { RefCell::new(None) };
+    /// Sparkle's "install now" block for a downloaded update, held while a capture is busy.
+    static PENDING_INSTALL: RefCell<Option<Retained<AnyObject>>> = const { RefCell::new(None) };
+}
+
+/// Installs a downloaded update (Sparkle quits and relaunches the app) unless a capture is
+/// recording or being built. Cheap when nothing is pending; the UI loop calls it every tick.
+pub fn install_pending_update() {
+    if PENDING_INSTALL.with(|pending| pending.borrow().is_none()) || crate::retention::busy() {
+        return;
+    }
+    let Some(block) = PENDING_INSTALL.with(|pending| pending.borrow_mut().take()) else {
+        return;
+    };
+    scrawl_log("Sparkle: installing the update and relaunching");
+    unsafe {
+        let _: () = msg_send![&*block, invoke];
+    }
 }
 
 pub fn start() {
