@@ -9,4 +9,5 @@ pub const BUNDLE_ID: &str = "com.scowalt.scrawl-remote";
 pub const DATA_NAME: &str = "scrawl-remote";
 
 /// The folder name under `~/Library/Logs`.
+#[cfg(target_os = "macos")]
 pub const LOG_NAME: &str = "Scrawl Remote";
