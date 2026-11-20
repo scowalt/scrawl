@@ -218,6 +218,10 @@ pub(super) fn start_updates() {
     crate::sparkle::start();
 }
 
+pub(super) fn install_pending_update() {
+    crate::sparkle::install_pending_update();
+}
+
 pub(super) fn check_for_updates() {
     crate::sparkle::check_for_updates();
 }

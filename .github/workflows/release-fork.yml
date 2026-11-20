@@ -1,0 +1,88 @@
+name: Release (Scrawl Remote)
+
+# Every main commit whose Check passed becomes a GitHub release of Scrawl Remote: a signed app zip
+# and a Sparkle appcast. The installed app reads the appcast from the latest release and updates
+# itself. See docs/fork-release.md.
+
+on:
+  workflow_run:
+    workflows: [Check]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-fork
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: macos-26
+    timeout-minutes: 90
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      BUILD_NUMBER: ${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.SHA }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+          cache-on-failure: true
+      - name: Install the Metal toolchain
+        run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Sparkle
+        run: echo "SPARKLE_DIR=$(SCRAWL_SPARKLE_DIR="$RUNNER_TEMP/sparkle" scripts/setup-sparkle.sh)" >> "$GITHUB_ENV"
+      - run: cargo build --release --locked
+      - name: No compromised eMudhra CA roots
+        run: scripts/check-ca-roots.sh target/release/scrawl
+      - name: Assemble and sign
+        env:
+          SCRAWL_SIGNING_P12: ${{ secrets.SCRAWL_SIGNING_P12 }}
+          SCRAWL_SIGNING_P12_PASSWORD: ${{ secrets.SCRAWL_SIGNING_P12_PASSWORD }}
+        run: |
+          keychain="$(scripts/signing-identity.sh)"
+          echo "KEYCHAIN=$keychain" >> "$GITHUB_ENV"
+          scripts/assemble-app.sh target/release "$RUNNER_TEMP/app/Scrawl Remote.app" "$keychain"
+          codesign -d -r- "$RUNNER_TEMP/app/Scrawl Remote.app"
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$RUNNER_TEMP/app/Scrawl Remote.app/Contents/Info.plist")"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "TAG=remote-v$version" >> "$GITHUB_ENV"
+      - name: Zip and appcast
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          updates="$RUNNER_TEMP/updates"
+          mkdir -p "$updates"
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/app/Scrawl Remote.app" \
+            "$updates/Scrawl-Remote-$VERSION.zip"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
+          "$SPARKLE_DIR/bin/generate_appcast" --ed-key-file "$RUNNER_TEMP/sparkle.key" \
+            --download-url-prefix "https://github.com/scowalt/scrawl/releases/download/$TAG/" \
+            --maximum-deltas 0 "$updates"
+          rm -f "$RUNNER_TEMP/sparkle.key"
+          grep -q 'sparkle:edSignature=' "$updates/appcast.xml"
+          grep -q "sparkle:version>$BUILD_NUMBER<" "$updates/appcast.xml"
+          cat "$updates/appcast.xml"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$SHA" --latest \
+            --title "Scrawl Remote $VERSION" \
+            --notes "Built from $SHA. The installed app updates itself from this release's appcast.xml." \
+            "$RUNNER_TEMP/updates/Scrawl-Remote-$VERSION.zip" "$RUNNER_TEMP/updates/appcast.xml"
+      - name: Remove the signing keychain
+        if: always()
+        run: '[ -z "${KEYCHAIN:-}" ] || security delete-keychain "$KEYCHAIN"'

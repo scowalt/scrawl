@@ -5475,6 +5475,7 @@ pub fn run_app(
                     .await;
                 let mut should_quit = false;
                 let _ = cx.update(|cx| {
+                    platform::install_pending_update();
                     let status = EXPORT_STATUS.lock().ok().and_then(|s| s.clone());
                     if status != shown_status {
                         match &status {
