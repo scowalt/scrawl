@@ -74,4 +74,15 @@ if ! security find-certificate -c "${NAME}" "${KEYCHAIN}" >/dev/null 2>&1; then
     "${KEYCHAIN}" >/dev/null
 fi
 
+if [[ -n "${SCRAWL_SIGNING_P12:-}" ]]; then
+  # A CI runner's codesign only finds identities in keychains on the search list.
+  existing=()
+  while IFS= read -r line; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    existing+=("${line//\"/}")
+  done < <(security list-keychains -d user)
+  security list-keychains -d user -s "${KEYCHAIN}" "${existing[@]}"
+  security find-identity -p codesigning "${KEYCHAIN}" >&2
+fi
+
 echo "${KEYCHAIN}"
