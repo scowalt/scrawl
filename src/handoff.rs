@@ -250,6 +250,18 @@ pub fn copy_png_to_clipboard(png_bytes: &[u8]) -> Result<()> {
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn copy_bundle_to_clipboard(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
+    #[cfg(target_os = "macos")]
+    if experiment(ZIP_PASTE) {
+        match crate::portable::zip_bundle(&directory, &bundle) {
+            Ok(portable) => {
+                return crate::portable::copy_file_to_clipboard(
+                    &portable.zip,
+                    Some(&portable.text),
+                );
+            }
+            Err(error) => crate::capture::scrawl_log(format!("zipPaste: {error:#}")),
+        }
+    }
     let shown = ensure_synced(&directory);
     let summary = crate::sketch::summary_markdown(&bundle, &shown);
     #[cfg(target_os = "windows")]
@@ -289,6 +301,24 @@ pub fn paste_bundle_at_target(bundle_dir: &Path, click_target: Option<[f32; 2]>)
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 pub fn paste_bundle_image_and_text(bundle_dir: &Path) -> Result<()> {
     let (directory, bundle) = load_bundle(bundle_dir)?;
+    #[cfg(target_os = "macos")]
+    if experiment(ZIP_PASTE) {
+        match crate::portable::zip_bundle(&directory, &bundle) {
+            Ok(portable) => {
+                crate::capture::wait_for_modifiers_released(350);
+                crate::portable::copy_file_to_clipboard(&portable.zip, None)?;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                crate::capture::post_synthetic_cmd_v();
+                // The composer takes a moment to accept the file before the text arrives.
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                copy_string_to_clipboard(&portable.text)?;
+                std::thread::sleep(std::time::Duration::from_millis(20));
+                crate::capture::post_synthetic_cmd_v();
+                return Ok(());
+            }
+            Err(error) => crate::capture::scrawl_log(format!("zipPaste: {error:#}")),
+        }
+    }
     let sheet_path = directory.join(&bundle.contact_sheet);
     let image = fs::read(&sheet_path).context("Could not read contact sheet")?;
     let (terminal_sheet, summary) = bundle_paste_payload(&directory, &bundle);
@@ -585,6 +615,10 @@ fn log_config_once(message: String) {
 /// More of what Scrawl already knows in the summary: marks, shortcuts, drags and windows inline
 /// at their time, numbered marks on shared frames, where a screen changed.
 pub const AGENT_CONTEXT: &str = "agentContext";
+
+/// Paste a capture as one `.zip` file plus its summary (`crate::portable`), so an agent on any
+/// machine can open it from the attachment.
+pub const ZIP_PASTE: &str = "zipPaste";
 
 /// Transcribe Mac recordings while they record, so finishing only waits for the last words
 /// (`live_transcribe`).
@@ -1213,6 +1247,7 @@ pub fn sync_bundle_to_with(
         "--exclude=*/contact-sheet-full.png".to_owned(),
         "--exclude=*/.media-sending".to_owned(),
         "--exclude=*/.remote.json".to_owned(),
+        "--exclude=*/*.zip".to_owned(),
         "-cf".to_owned(),
         "-".to_owned(),
         name_str.clone(),
@@ -1858,7 +1893,7 @@ pub fn session_prompt_payload(bundle: &ScrawlBundle, shown_dir: &Path) -> serde_
 /// A `file://` URL for an absolute path, percent-encoding everything but unreserved
 /// characters and `/` ("Application Support" → "Application%20Support"). A Windows path
 /// (`C:\Users\…`, or `\\?\C:\…` after `canonicalize`) becomes `file:///C:/Users/…`.
-fn file_uri(path: &Path) -> String {
+pub(crate) fn file_uri(path: &Path) -> String {
     let mut text = path.to_string_lossy().into_owned();
     let mut uri = String::from("file://");
     let windows_path = cfg!(windows) || text.as_bytes().get(1) == Some(&b':');
