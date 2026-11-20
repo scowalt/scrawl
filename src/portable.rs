@@ -41,8 +41,14 @@ pub fn zip_bundle_with(
     let stem = name.strip_suffix(".scrawl").unwrap_or(&name).to_owned();
     let zip_name = format!("{stem}.zip");
 
-    let staging_root =
-        std::env::temp_dir().join(format!("scrawl-zip-{stem}-{}", std::process::id()));
+    // Unique per call: a finished capture's copy and ⌥⇧V can zip the same bundle at once.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let call = format!(
+        "{}-{}",
+        std::process::id(),
+        NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    );
+    let staging_root = std::env::temp_dir().join(format!("scrawl-zip-{stem}-{call}"));
     let _ = fs::remove_dir_all(&staging_root);
     let _cleanup = RemoveOnDrop(staging_root.clone());
     let staging = staging_root.join(&name);
@@ -85,7 +91,7 @@ pub fn zip_bundle_with(
     fs::write(staging.join("summary.md"), &summary)?;
 
     let zip = bundle_dir.join(&zip_name);
-    let partial = bundle_dir.join(format!(".{zip_name}.partial"));
+    let partial = bundle_dir.join(format!(".{zip_name}.{call}.partial"));
     let _ = fs::remove_file(&partial);
     let output = Command::new("/usr/bin/ditto")
         .args([
@@ -248,6 +254,25 @@ mod tests {
             "{}",
             portable.text
         );
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_same_bundle_zips_from_several_threads_at_once() {
+        let (root, dir) = fixture();
+        let (_, bundle) = crate::handoff::load_bundle(&dir).unwrap();
+        let results: Vec<Result<Portable>> = std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..8)
+                .map(|_| scope.spawn(|| zip_bundle_with(&dir, &bundle, 0)))
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+        for result in results {
+            assert!(result.is_ok(), "{:#}", result.err().unwrap());
+        }
+        let unpacked = root.join("elsewhere");
+        unzip(&dir.join("scrawl-zip-demo.zip"), &unpacked);
+        assert!(unpacked.join("scrawl-zip-demo.scrawl/summary.md").is_file());
         let _ = fs::remove_dir_all(&root);
     }
 
