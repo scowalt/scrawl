@@ -9,13 +9,15 @@
 > | Settings | `~/.config/scrawl/config.json` | `~/.config/scrawl-remote/config.json` |
 > | Captures | `~/Library/Application Support/scrawl/captures` | `~/Library/Application Support/scrawl-remote/captures` |
 > | Logs | `~/Library/Logs/Scrawl` | `~/Library/Logs/Scrawl Remote` |
-> | Updates | Sparkle | none (no Sparkle, so the official appcast can't replace it) |
+> | Updates | Sparkle, from kitlangton's site | Sparkle, from `scowalt/scrawl` releases ([docs/fork-release.md](docs/fork-release.md)) |
 >
 > With separate settings, `agentHost` affects only the fork. The official app keeps sending to OpenCode the way it did before. Each app also has its own retention and crash recovery, and each runs its own onboarding, because macOS grants permissions per app.
 >
-> Some things can't be separated. Both apps default to `⌥⇧S` / `⌥⇧V`, and macOS lets both register the same shortcut, so with both running one press reaches both. Quit one of them, or change the fork's shortcuts in its Settings. Only one app can hold the iPhone/ScrawlKit ingest port (47777); the second to start logs `port 47777 already in use`.
+> Some things can't be separated. Both apps default to `⌥⇧S` / `⌥⇧V`, and macOS lets both register the same shortcut, so with both running one press reaches both. Quit one of them, or change the fork's shortcuts in its Settings. Only one app can hold the iPhone/ScrawlKit ingest port (47777); the second to start logs `port 47777 already in use`. Both apps also claim [`scrawl://` links](#links-macos), and macOS hands each link to only one of them; with **Allow URL scheme API** off, that app just opens its Settings.
 >
-> `./scripts/install-app.sh` builds, signs and restarts only the fork. It signs with a self-signed certificate (`scripts/signing-identity.sh`) kept in its own keychain, `~/Library/Keychains/scrawl-remote-signing.keychain-db`. macOS checks permission grants against the bundle id plus that certificate, so Screen Recording, Microphone and Accessibility survive rebuilds. An ad-hoc signature would change with every build and lose them.
+> Install it with `./scripts/install-release.sh`, which fetches the latest release; from then on it updates itself. Every `main` commit that passes CI becomes a release, and a daily bb automation keeps `main` rebased on upstream ([docs/fork-release.md](docs/fork-release.md)). `./scripts/install-app.sh` installs a local debug build instead, with no updater.
+>
+> Releases and local builds are signed with the same self-signed certificate (`scripts/signing-identity.sh`, kept in its own keychain and in the repo's Actions secrets). macOS checks permission grants against the bundle id plus that certificate, so Screen Recording, Microphone and Accessibility survive updates and rebuilds. An ad-hoc signature would change with every build and lose them.
 
 Show an agent a problem instead of describing it.
 
