@@ -27,6 +27,18 @@ fn main() {
     }
 }
 
+/// `target/<profile>`, where cargo puts the binaries: the parent of the nearest `build` folder
+/// above OUT_DIR. Cargo before 1.100 used `<profile>/build/<pkg>-<hash>/out`, and 1.100 uses
+/// `<profile>/build/<pkg>/<hash>/out`, so a fixed number of levels up is wrong for one of them.
+fn profile_dir() -> Option<PathBuf> {
+    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR")?);
+    out_dir
+        .ancestors()
+        .find(|dir| dir.file_name().is_some_and(|name| name == "build"))
+        .and_then(|build| build.parent())
+        .map(PathBuf::from)
+}
+
 /// transcribe.cpp's DLLs (`dynamic-backends`: `transcribe.dll`, `ggml*.dll`) beside `scrawl.exe`
 /// and the test binaries, which load them at start. Its own build script copies them there too,
 /// but only when it runs, and a build restored from CI's cache skips it.
@@ -36,9 +48,8 @@ fn stage_transcribe_dlls() {
     let Some(runtime) = std::env::var_os("DEP_TRANSCRIBE_CPP_RUNTIME_DIR") else {
         return;
     };
-    let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    // OUT_DIR is <target>/<profile>/build/scrawl-<hash>/out.
-    let Some(profile) = out_dir.ancestors().nth(3) else {
+    let Some(profile) = profile_dir() else {
+        println!("cargo:warning=no profile folder above OUT_DIR; transcribe.dll isn't staged");
         return;
     };
     let dlls: Vec<PathBuf> = std::fs::read_dir(&runtime)
@@ -48,7 +59,17 @@ fn stage_transcribe_dlls() {
         .map(|entry| entry.path())
         .filter(|path| path.extension().is_some_and(|ext| ext == "dll"))
         .collect();
-    for dir in [profile.to_path_buf(), profile.join("deps")] {
+    if dlls.is_empty() {
+        println!(
+            "cargo:warning=no DLLs in {}; transcribe.dll isn't staged",
+            PathBuf::from(&runtime).display()
+        );
+    }
+    for dir in [
+        profile.clone(),
+        profile.join("deps"),
+        profile.join("examples"),
+    ] {
         let _ = std::fs::create_dir_all(&dir);
         for dll in &dlls {
             if let Err(error) = std::fs::copy(dll, dir.join(dll.file_name().unwrap())) {
@@ -176,12 +197,8 @@ fn compile_helper() {
     }
     let plist = helper_dir.join("Info.plist");
     println!("cargo:rerun-if-changed={}", plist.display());
-    // OUT_DIR is target/<profile>/build/scrawl-<hash>/out.
     let out_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
-    let profile_dir = out_dir
-        .ancestors()
-        .nth(3)
-        .expect("Unexpected OUT_DIR layout");
+    let profile_dir = profile_dir().expect("Unexpected OUT_DIR layout");
     let arch = match std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() {
         Ok("aarch64") => "arm64",
         Ok(other) => other,
