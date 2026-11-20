@@ -10,6 +10,11 @@ on:
     types: [completed]
     branches: [main]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish a release (false builds and signs as a dry run)
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -75,7 +80,14 @@ jobs:
           grep -q 'sparkle:edSignature=' "$updates/appcast.xml"
           grep -q "sparkle:version>$BUILD_NUMBER<" "$updates/appcast.xml"
           cat "$updates/appcast.xml"
+      - name: Keep the dry run's app
+        if: github.event_name == 'workflow_dispatch' && !inputs.publish
+        uses: actions/upload-artifact@v5
+        with:
+          name: scrawl-remote-${{ env.VERSION }}
+          path: ${{ runner.temp }}/updates
       - name: Publish
+        if: github.event_name != 'workflow_dispatch' || inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
