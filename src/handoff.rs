@@ -2593,6 +2593,7 @@ mod tests {
     /// The remote login shell parses the command ssh sends; whichever it is, `sh` must run the
     /// script byte for byte with stdin still free.
     #[test]
+    #[cfg(unix)]
     fn posix_command_survives_any_login_shell() {
         use std::io::Write;
         use std::process::Stdio;
@@ -2676,6 +2677,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn remote_sync_unpacks_light_then_heavy_and_rewrites_paths_for_paste_and_session() {
         use std::process::Stdio;
         use std::sync::Mutex;
@@ -2793,6 +2795,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn first_sync_without_media_leaves_the_resolved_path_on_the_host() {
         use std::process::Stdio;
         use std::sync::Mutex;
