@@ -256,6 +256,16 @@
       "docs": ["docs/keyframes-and-text.md"]
     },
     {
+      "id": "zip-paste",
+      "group": "finish",
+      "name": "Capture as a zip",
+      "says": "Copies and pastes the capture as one .zip file plus its summary, with paths relative to the folder it unzips to, so an agent on any machine can open it from the attachment.",
+      "status": "experiment:zipPaste",
+      "platforms": ["mac"],
+      "added": "2026-11-19",
+      "docs": ["docs/keyframes-and-text.md"]
+    },
+    {
       "id": "review-window",
       "group": "finish",
       "name": "Review window",
