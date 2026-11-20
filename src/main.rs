@@ -39,6 +39,8 @@ mod phone;
 // Lowers the output volume while recording on macOS; elsewhere a no-op.
 #[cfg_attr(not(target_os = "macos"), path = "win/playback.rs")]
 mod playback;
+#[cfg(target_os = "macos")]
+mod portable;
 mod recent;
 mod recover;
 mod render;
